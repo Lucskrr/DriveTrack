@@ -9,11 +9,15 @@ console.log('DB_PASSWORD:', process.env.DB_PASSWORD ? '******' : 'NÃO DEFINIDO'
 console.log('DB_HOST:', process.env.DB_HOST);
 console.log('DB_DIALECT:', process.env.DB_DIALECT);
 
-// Verificar se o DB_DIALECT está correto
-if (!process.env.DB_DIALECT) {
-  console.error('❌ ERRO: A variável DB_DIALECT não está definida!');
-  process.exit(1); // Interrompe a execução se o dialeto não estiver definido
-}
+// Verificação das variáveis de ambiente essenciais
+const requiredEnvVars = ['DB_NAME', 'DB_USER', 'DB_PASSWORD', 'DB_HOST', 'DB_DIALECT'];
+
+requiredEnvVars.forEach((envVar) => {
+  if (!process.env[envVar]) {
+    console.error(`❌ ERRO: A variável de ambiente ${envVar} não está definida!`);
+    process.exit(1);
+  }
+});
 
 // Criando a instância do Sequelize
 const sequelize = new Sequelize(
