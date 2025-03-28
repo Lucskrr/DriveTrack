@@ -1,8 +1,8 @@
 const express = require('express');
 const router = express.Router();
-const tripController = require('../controllers/tripController');
+const tripController = require('../controllers/tripsController');
 
-// Rota para criar uma viagem
+// Criar uma viagem
 router.post('/create', tripController.createTrip);
 
 module.exports = router;

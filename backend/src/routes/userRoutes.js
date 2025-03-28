@@ -1,28 +1,39 @@
 const express = require('express');
 const router = express.Router();
 const userController = require('../controllers/userController');
-const authenticateToken = require('../middleware/authMiddleware');
+const authenticateToken = require('../middlewares/authMiddleware');
+const { loginLimiter } = require('../middlewares/rateLimiter');
+const cacheMiddleware = require('../middlewares/cacheMiddleware');
 
-// Rota para registrar usuário
+/**
+ * @swagger
+ * tags:
+ *   name: Usuários
+ *   description: Endpoints relacionados aos usuários
+ */
+
+// Registrar usuário
 router.post('/register', userController.registerUser);
 
-// Rota para login de usuário
-router.post('/login', userController.loginUser);
+// Login do usuário
+router.post('/login', loginLimiter, (req, res, next) => {
+    req.ipAddress = req.ip;
+    next();
+}, userController.loginUser);
 
-// Rota para obter o perfil do usuário (protegida)
+// Perfil do usuário
 router.get('/profile', authenticateToken, userController.getUserProfile);
-
-// Rota para atualizar dados do usuário (protegida)
 router.put('/profile', authenticateToken, userController.updateUser);
-
-// Rota para deletar conta do usuário (protegida)
 router.delete('/profile', authenticateToken, userController.deleteUser);
 
-// 🔹 NOVAS ROTAS PARA RECUPERAÇÃO DE SENHA 🔹
-// Rota para solicitar recuperação de senha
+// Recuperação de senha
 router.post('/request-password-reset', userController.requestPasswordReset);
-
-// Rota para redefinir a senha com token
 router.post('/reset-password', userController.resetPassword);
+
+// Obter usuário por ID
+router.get('/:id', authenticateToken, cacheMiddleware, userController.getUserById);
+
+// Obter todos os usuários
+router.get('/', authenticateToken, cacheMiddleware, userController.getUsers);
 
 module.exports = router;

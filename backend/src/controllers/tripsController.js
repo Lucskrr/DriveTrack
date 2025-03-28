@@ -1,4 +1,4 @@
-const Trip = require('../models/tripModel');
+const Trip = require('../models/tripsModel');
 
 // Função para criar uma nova viagem
 const createTrip = async (req, res) => {

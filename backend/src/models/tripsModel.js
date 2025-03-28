@@ -1,7 +1,7 @@
 const { Sequelize, DataTypes } = require('sequelize');
 const sequelize = require('../config/dbConfig');
 
-const Trip = sequelize.define('Trip', {
+const Trips = sequelize.define('Trips', {
     id: {
         type: DataTypes.INTEGER,
         primaryKey: true,
@@ -29,4 +29,4 @@ const Trip = sequelize.define('Trip', {
     },
 });
 
-module.exports = Trip;
+module.exports = Trips;
