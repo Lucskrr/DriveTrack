@@ -2,3 +2,4 @@
 {"level":"info","message":"{\"userId\":2,\"action\":\"Login\",\"details\":\"Usuário autenticado com sucesso\",\"timestamp\":\"2025-03-28T16:43:44.391Z\"}"}
 {"level":"info","message":"{\"userId\":null,\"action\":\"Falha no login\",\"details\":\"Tentativa com e-mail: joao.silva@teste.com\",\"timestamp\":\"2025-03-28T16:49:10.364Z\"}"}
 {"level":"info","message":"{\"userId\":2,\"action\":\"Login\",\"details\":\"Usuário autenticado com sucesso\",\"timestamp\":\"2025-03-28T16:49:31.988Z\"}"}
+{"level":"info","message":"{\"userId\":3,\"action\":\"Login\",\"details\":\"Usuário autenticado com sucesso\",\"ipAddress\":\"::1\",\"timestamp\":\"2025-03-29T17:42:37.351Z\"}"}

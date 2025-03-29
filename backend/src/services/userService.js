@@ -57,6 +57,12 @@ const updateUserSchema = Joi.object({
     password: Joi.string().min(8).optional()
 });
 
+// 📌 **Função utilitária para validação**
+const validate = (schema, data) => {
+    const { error } = schema.validate(data);
+    if (error) throw new AppError(error.details[0].message, 400);
+};
+
 // 📌 **Adição de token à blacklist (Logout)**
 const addTokenToBlacklist = async (token) => {
     try {
@@ -78,20 +84,15 @@ const isTokenBlacklisted = async (token) => {
 
 // 📌 **Criar usuário com validação**
 const createUser = async (name, email, password) => {
-    if (!name || !email || !password) throw new AppError('Nome, e-mail e senha são obrigatórios.', 400);
-    
+    validate(userSchema, { name, email, password });
+
     const existingUser = await User.findOne({ where: { email } });
     if (existingUser) throw new AppError('E-mail já cadastrado.', 409);
 
-    const hashedPassword = await bcrypt.hash(password, 12);
+    const hashedPassword = await bcrypt.hash(password, saltRounds);
     const newUser = await User.create({ name, email, password: hashedPassword });
 
     return { id: newUser.id, name: newUser.name, email: newUser.email };
-};
-
-const isIPBlocked = async (ip) => {
-    const blocked = await redisClient.get(`blocked:${ip}`);
-    return blocked !== null;
 };
 
 // 📌 **Autenticar usuário e gerar JWT seguro**
@@ -104,9 +105,20 @@ const authenticateUser = async (email, password, ip) => {
 
     await logAction(user.id, 'Login', 'Usuário autenticado com sucesso', ip);
 
-    const token = jwt.sign({ id: user.id }, privateKey, { algorithm: 'RS256', expiresIn: process.env.JWT_EXPIRATION });
+    // Gerar o token de acesso (JWT)
+    const accessToken = jwt.sign({ id: user.id }, privateKey, { algorithm: 'RS256', expiresIn: process.env.JWT_EXPIRATION });
 
-    return { user: { id: user.id, name: user.name, email: user.email }, token };
+    // Gerar o refresh token
+    const refreshToken = crypto.randomBytes(40).toString('hex');
+
+    // Armazenar o refresh token no Redis
+    await redisClient.set(`refreshToken:${user.id}`, refreshToken, 'EX', 7 * 24 * 60 * 60); // Expira em 7 dias
+
+    return { 
+        user: { id: user.id, name: user.name, email: user.email }, 
+        accessToken, 
+        refreshToken 
+    };
 };
 
 // 📌 **Logout (invalidação do token)**
@@ -121,16 +133,16 @@ const requestPasswordReset = async (email) => {
     const user = await User.findOne({ where: { email } });
     if (!user) throw new AppError('Usuário não encontrado.', 404);
 
-    // Gerar o token de reset de senha
     const resetToken = crypto.randomBytes(32).toString('hex');
-
-    // Criar o hash do token
     const hashedToken = crypto.createHash('sha256').update(resetToken).digest('hex');
-    
-    // Armazenar o token hasheado e a data de expiração
+
     user.resetToken = hashedToken;
     user.resetTokenExpires = Date.now() + 3600000; // 1 hora
     await user.save();
+
+    console.log('📧 Token de redefinição gerado:', resetToken);
+    console.log('🔒 Token hashado armazenado no banco:', hashedToken);
+    console.log('⏳ Token expira em:', new Date(user.resetTokenExpires).toISOString());
 
     const resetLink = `${process.env.FRONTEND_URL}/reset-password?token=${resetToken}`;
 
@@ -156,30 +168,38 @@ const requestPasswordReset = async (email) => {
 
 // 📌 **Redefinição de senha com validação**
 const resetPassword = async (token, newPassword) => {
-    // Hash do token recebido
-    const hashedToken = crypto.createHash('sha256').update(token).digest('hex');
+    console.log('🔑 Token recebido para redefinição:', token);
 
-    // Procurar o usuário usando o token hasheado
+    const hashedToken = crypto.createHash('sha256').update(token).digest('hex');
+    console.log('🔒 Token hashado para validação:', hashedToken);
+
     const user = await User.findOne({
         where: { resetToken: hashedToken, resetTokenExpires: { [Op.gt]: Date.now() } }
     });
 
-    if (!user) throw new AppError('Token inválido ou expirado.', 400);
+    if (!user) {
+        console.error('❌ Token inválido ou expirado.');
+        throw new AppError('Token inválido ou expirado.', 400);
+    }
 
-    const { error } = Joi.string().min(8).validate(newPassword);
-    if (error) throw new AppError('A senha deve ter no mínimo 8 caracteres.', 400);
+    console.log('✅ Token válido. Atualizando senha para o usuário:', user.email);
 
-    // Atualizar a senha do usuário
+    validate(Joi.string().min(8), newPassword);
+
     user.password = await bcrypt.hash(newPassword, saltRounds);
     user.resetToken = null;
     user.resetTokenExpires = null;
     await user.save();
+
+    console.log('🔒 Senha redefinida com sucesso para o usuário:', user.email);
 
     return { message: 'Senha redefinida com sucesso.' };
 };
 
 // 📌 **Atualizar usuário com validação**
 const updateUser = async (id, name, email, password) => {
+    validate(updateUserSchema, { name, email, password });
+
     const updates = {};
     if (name) updates.name = name;
     if (email) updates.email = email;
@@ -188,7 +208,7 @@ const updateUser = async (id, name, email, password) => {
     const [updated] = await User.update(updates, { where: { id } });
 
     if (!updated) throw new AppError('Usuário não encontrado.', 404);
-    
+
     return { id, ...updates };
 };
 
@@ -201,6 +221,7 @@ const deleteUser = async (id) => {
     return { message: 'Usuário excluído com sucesso.' };
 };
 
+// 📌 **Obter lista de usuários com paginação**
 const getUsers = async (page = 1, limit = 10) => {
     const offset = (page - 1) * limit;
 
@@ -222,24 +243,12 @@ const getUsers = async (page = 1, limit = 10) => {
 // 📌 **Obter usuário por ID**
 const getUserById = async (id) => {
     const user = await User.findByPk(id, {
-        attributes: ['id', 'name', 'email', 'createdAt'] // Escolha os campos que deseja retornar
+        attributes: ['id', 'name', 'email', 'createdAt']
     });
 
     if (!user) throw new AppError('Usuário não encontrado.', 404);
 
     return user;
-};
-
-// Exemplo de implementação da função getUserById no service
-
-exports.getUserById = async (userId) => {
-    try {
-        // Suponha que você tenha um modelo de usuário com Sequelize ou outro ORM
-        const user = await User.findByPk(userId); // Sequelize exemplo, altere conforme sua implementação
-        return user;
-    } catch (error) {
-        throw new Error('Erro ao buscar usuário: ' + error.message);
-    }
 };
 
 module.exports = {
@@ -252,5 +261,5 @@ module.exports = {
     updateUser,
     deleteUser,
     isTokenBlacklisted,
-    getUserById
+    getUsers
 };

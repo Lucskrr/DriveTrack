@@ -11,12 +11,26 @@ const options = {
         },
         servers: [
             {
-                url: 'http://localhost:3000',
+                url: 'http://localhost:3000/api', // Incluído o prefixo /api
                 description: 'Servidor local',
             },
         ],
+        components: {
+            securitySchemes: {
+                bearerAuth: {
+                    type: 'http',
+                    scheme: 'bearer',
+                    bearerFormat: 'JWT',
+                },
+            },
+        },
+        security: [
+            {
+                bearerAuth: [],
+            },
+        ],
     },
-    apis: ['./routes/*.js'], // Caminho para os arquivos de rotas
+    apis: ['./src/routes/*.js'], // Caminho ajustado para os arquivos de rotas
 };
 
 const swaggerSpec = swaggerJsdoc(options);
@@ -24,6 +38,7 @@ const swaggerSpec = swaggerJsdoc(options);
 const setupSwagger = (app) => {
     app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(swaggerSpec));
     console.log('📄 Swagger rodando em: http://localhost:3000/api-docs');
+    console.log('📄 Swagger carregando definições de:', options.apis);
 };
 
 module.exports = setupSwagger;
