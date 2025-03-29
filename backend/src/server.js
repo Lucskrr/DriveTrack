@@ -1,6 +1,6 @@
 require('dotenv').config();
 const express = require('express');
-const sequelize = require('./config/dbConfig'); // Conexão com o banco de dados
+const sequelize = require('./config/database'); // Conexão com o banco de dados
 const setupSwagger = require('./config/swaggerConfig'); // Configuração do Swagger
 const compression = require('compression');
 const errorHandler = require('./middlewares/errorMiddleware');

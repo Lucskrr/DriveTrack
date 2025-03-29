@@ -1,6 +1,6 @@
 // src/models/index.js
 const User = require('./userModel');  // Importe o modelo de usuário
-const sequelize = require('../config/dbConfig'); // Se necessário, importe a configuração do sequelize
+const sequelize = require('../config/database'); // Se necessário, importe a configuração do sequelize
 
 module.exports = {
     User,
