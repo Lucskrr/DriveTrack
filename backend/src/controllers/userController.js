@@ -1,20 +1,19 @@
 const userService = require('../services/userService');
 const jwt = require('jsonwebtoken'); // Para manipulação de tokens JWT
 const redisClient = require('../config/redis'); // Certifique-se de que o cliente Redis esteja configurado corretamente
-
+const { validationResult } = require('express-validator'); // Para validação de entrada
 
 // Registrar um novo usuário
 exports.registerUser = async (req, res, next) => {
     try {
-        const { name, email, password } = req.body;
-
-        // Validação simples
-        if (!name || !email || !password) {
-            return res.status(400).json({ status: "error", message: "Nome, e-mail e senha são obrigatórios." });
+        const errors = validationResult(req);
+        if (!errors.isEmpty()) {
+            return res.status(400).json({ errors: errors.array() });
         }
 
+        const { name, email, password } = req.body;
         const user = await userService.createUser(name, email, password);
-        res.status(201).json(user);
+        res.status(201).json({ message: 'Usuário registrado com sucesso.', user });
     } catch (error) {
         next(error);
     }
@@ -23,9 +22,14 @@ exports.registerUser = async (req, res, next) => {
 // Login do usuário
 exports.loginUser = async (req, res, next) => {
     try {
+        const errors = validationResult(req);
+        if (!errors.isEmpty()) {
+            return res.status(400).json({ errors: errors.array() });
+        }
+
         const { email, password } = req.body;
-        const data = await userService.authenticateUser(email, password);
-        res.json(data);
+        const data = await userService.authenticateUser(email, password, req.ip);
+        res.json({ message: 'Login realizado com sucesso.', ...data });
     } catch (error) {
         next(error);
     }
@@ -34,16 +38,14 @@ exports.loginUser = async (req, res, next) => {
 // Logout do usuário (invalidação do token)
 exports.logoutUser = async (req, res, next) => {
     try {
-        const token = req.token;  // O token já foi adicionado ao req pelo middleware de autenticação
+        const { refreshToken } = req.body;
 
-        // Decodificar o token para obter a expiração
-        const decoded = jwt.decode(token);
+        if (!refreshToken) {
+            return res.status(400).json({ error: 'Refresh token não fornecido.' });
+        }
 
-        // Calcular o tempo restante até a expiração do token (em milissegundos)
-        const expirationTime = decoded.exp * 1000 - Date.now();
-
-        // Adicionar o token à blacklist no Redis com o tempo de expiração
-        await redisClient.setex(`blacklist:${token}`, expirationTime / 1000, 'blacklisted'); // tempo em segundos
+        // Remover o refresh token do Redis
+        await redisClient.del(`refreshToken:${refreshToken}`);
 
         res.json({ message: 'Logout realizado com sucesso.' });
     } catch (error) {
@@ -54,6 +56,11 @@ exports.logoutUser = async (req, res, next) => {
 // Solicitar recuperação de senha
 exports.requestPasswordReset = async (req, res, next) => {
     try {
+        const errors = validationResult(req);
+        if (!errors.isEmpty()) {
+            return res.status(400).json({ errors: errors.array() });
+        }
+
         const { email } = req.body;
         await userService.requestPasswordReset(email);
         res.json({ message: 'E-mail de recuperação de senha enviado. Verifique sua caixa de entrada.' });
@@ -62,32 +69,30 @@ exports.requestPasswordReset = async (req, res, next) => {
     }
 };
 
+// Redefinir senha
 exports.resetPassword = async (req, res, next) => {
     try {
-        // Pegar o token do cabeçalho Authorization
-        const token = req.header('Authorization')?.replace('Bearer ', '');
-        if (!token) {
-            return res.status(401).json({ message: 'Token ausente no cabeçalho.' });
+        const errors = validationResult(req);
+        if (!errors.isEmpty()) {
+            return res.status(400).json({ errors: errors.array() });
         }
 
-        const { newPassword } = req.body;
-
-        // Verificar se o token é válido e obter as informações do usuário
-        const decoded = jwt.verify(token, publicKey, { algorithms: ['RS256'] });
-        const userId = decoded.id;
-
-        // Supondo que userService tenha uma função para atualizar a senha
-        await userService.updatePassword(userId, newPassword);
-
-        res.json({ message: 'Senha redefinida com sucesso.' });
+        const { token, newPassword } = req.body;
+        const result = await userService.resetPassword(token, newPassword);
+        res.json(result);
     } catch (error) {
-        next(error); // Passa o erro para o handler de erro
+        next(error);
     }
 };
 
 // Atualizar usuário
 exports.updateUser = async (req, res, next) => {
     try {
+        const errors = validationResult(req);
+        if (!errors.isEmpty()) {
+            return res.status(400).json({ errors: errors.array() });
+        }
+
         const { name, email, password } = req.body;
         const userId = req.user.id;
         const updatedUser = await userService.updateUser(userId, name, email, password);
@@ -111,7 +116,6 @@ exports.deleteUser = async (req, res, next) => {
 // Obter perfil do usuário
 exports.getUserProfile = async (req, res, next) => {
     try {
-        // A partir do token, o req.user.id deve ter sido preenchido pelo middleware de autenticação
         const user = await userService.getUserById(req.user.id);
         res.json(user);
     } catch (error) {
@@ -120,9 +124,9 @@ exports.getUserProfile = async (req, res, next) => {
 };
 
 // Obter lista de usuários (paginação)
-exports.getUsers = async (req, res) => {
-    const { page, limit } = req.query;
+exports.getUsers = async (req, res, next) => {
     try {
+        const { page = 1, limit = 10 } = req.query;
         const result = await userService.getUsers(Number(page), Number(limit));
         res.json(result);
     } catch (error) {
@@ -130,18 +134,36 @@ exports.getUsers = async (req, res) => {
     }
 };
 
-// Adicione a função getUserById no seu controller
+// Obter usuário por ID
 exports.getUserById = async (req, res, next) => {
     try {
-        const userId = req.params.id; // O ID do usuário vem da URL
-        const user = await userService.getUserById(userId); // Chama o serviço para pegar o usuário pelo ID
-        if (!user) {
-            return res.status(404).json({ message: 'Usuário não encontrado' });
-        }
+        const userId = req.params.id;
+        const user = await userService.getUserById(userId);
         res.json(user);
     } catch (error) {
         next(error);
     }
 };
 
+exports.refreshAccessToken = async (req, res, next) => {
+    try {
+        const { refreshToken } = req.body;
 
+        if (!refreshToken) {
+            return res.status(400).json({ error: 'Refresh token não fornecido.' });
+        }
+
+        // Verificar se o refresh token é válido
+        const userId = await redisClient.get(`refreshToken:${refreshToken}`);
+        if (!userId) {
+            return res.status(403).json({ error: 'Refresh token inválido ou expirado.' });
+        }
+
+        // Gerar um novo token de acesso
+        const newAccessToken = jwt.sign({ id: userId }, privateKey, { algorithm: 'RS256', expiresIn: process.env.JWT_EXPIRATION });
+
+        res.json({ accessToken: newAccessToken });
+    } catch (error) {
+        next(error);
+    }
+};
